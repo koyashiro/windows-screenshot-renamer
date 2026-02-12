@@ -12,6 +12,8 @@ use log::{debug, error, info};
 
 static RE_SNIPPING_TOOL_JA: Lazy<Regex> =
     lazy_regex!(r"^スクリーンショット (\d{4}-\d{2}-\d{2} \d{6})\.png$");
+static RE_OLD_SNIPPING_TOOL_JA: Lazy<Regex> =
+    lazy_regex!(r"^スクリーンショット_(\d{4})(\d{2})(\d{2})_(\d{6})\.png$");
 static RE_SCREENSHOT_JA: Lazy<Regex> = lazy_regex!(r"^スクリーンショット(?: \(\d+\))?\.png$");
 
 fn main() -> ExitCode {
@@ -77,6 +79,13 @@ fn screenshot_dir() -> anyhow::Result<std::path::PathBuf> {
 fn new_file_name(entry: &DirEntry, file_name: &str) -> anyhow::Result<Option<String>> {
     if let Some(caps) = RE_SNIPPING_TOOL_JA.captures(file_name) {
         return Ok(Some(format!("Screenshot {}.png", &caps[1])));
+    }
+
+    if let Some(caps) = RE_OLD_SNIPPING_TOOL_JA.captures(file_name) {
+        return Ok(Some(format!(
+            "Screenshot {}-{}-{} {}.png",
+            &caps[1], &caps[2], &caps[3], &caps[4]
+        )));
     }
 
     if RE_SCREENSHOT_JA.is_match(file_name) {
