@@ -1,0 +1,12 @@
+[package]
+name = "windows-screenshot-renamer"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+anyhow = "1.0.101"
+chrono = "0.4.43"
+dirs-next = "2.0.0"
+env_logger = "0.11.9"
+lazy-regex = "3.6.0"
+log = "0.4.29"
