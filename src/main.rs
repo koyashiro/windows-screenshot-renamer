@@ -56,6 +56,14 @@ fn run() -> anyhow::Result<()> {
         };
         let new_path = screenshot_dir.join(&new_file_name);
 
+        if new_path.exists() {
+            error!(
+                "failed to rename {:?} to {:?}: destination already exists",
+                file_name, new_file_name
+            );
+            continue;
+        }
+
         if let Err(e) = rename(entry.path(), &new_path) {
             error!(
                 "failed to rename {:?} to {:?}: {e}",
