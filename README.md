@@ -12,10 +12,10 @@ Targets files in the `%USERPROFILE%\Pictures\Screenshots` directory.
 | `スクリーンショット_20260213_123456.png`                | `Screenshot 2026-02-13 123456.png`                      |
 | `スクリーンショット.png` / `スクリーンショット (1).png` | `Screenshot 2026-02-13 123456.png` (derived from mtime) |
 
+## Installation
+
 > [!NOTE]
 > This tool is Windows-only.
-
-## Installation
 
 ```powershell
 cargo install --git https://github.com/koyashiro/windows-screenshot-renamer
