@@ -18,6 +18,10 @@ struct Args {
     /// Screenshots directory
     #[arg(long, default_value_os_t = default_screenshots_dir())]
     screenshots_dir: PathBuf,
+
+    /// Dry run (print what would be renamed without actually renaming)
+    #[arg(long)]
+    dry_run: bool,
 }
 
 fn default_screenshots_dir() -> PathBuf {
@@ -46,6 +50,7 @@ fn main() -> ExitCode {
 fn run() -> anyhow::Result<()> {
     let args = Args::parse();
     let screenshot_dir = args.screenshots_dir;
+    let dry_run = args.dry_run;
     let screenshot_files =
         read_dir(&screenshot_dir).context("failed to read screenshot directory")?;
 
@@ -78,6 +83,11 @@ fn run() -> anyhow::Result<()> {
                 "failed to rename {:?} to {:?}: destination already exists",
                 file_name, new_file_name
             );
+            continue;
+        }
+
+        if dry_run {
+            info!("{:?} => {:?} (dry run)", file_name, new_file_name);
             continue;
         }
 
