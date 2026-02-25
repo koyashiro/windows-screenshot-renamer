@@ -62,13 +62,16 @@ fn main() -> ExitCode {
     if let Some(parent) = log_file.parent()
         && let Err(e) = std::fs::create_dir_all(parent)
     {
-        eprintln!("failed to create log directory {:?}: {e}", parent);
+        eprintln!(
+            "failed to create log directory \"{}\": {e}",
+            parent.display()
+        );
         return ExitCode::FAILURE;
     }
     let file = match OpenOptions::new().create(true).append(true).open(log_file) {
         Ok(file) => file,
         Err(e) => {
-            eprintln!("failed to open log file {:?}: {e}", log_file);
+            eprintln!("failed to open log file \"{}\": {e}", log_file.display());
             return ExitCode::FAILURE;
         }
     };
@@ -132,36 +135,44 @@ fn process_entry(screenshot_dir: &Path, entry: &DirEntry, dry_run: bool) {
     };
 
     let Ok(new_file_name) = new_file_name(entry, &file_name) else {
-        error!("failed to determine new file name for {:?}", file_name);
+        error!("failed to determine new file name for \"{}\"", file_name);
         return;
     };
     let Some(new_file_name) = new_file_name else {
-        debug!("skipping {:?}", file_name);
+        debug!("skipping \"{}\"", file_name);
         return;
     };
     let new_path = screenshot_dir.join(&new_file_name);
 
+    let old_path = entry.path();
+
     if new_path.exists() {
         error!(
-            "failed to rename {:?} to {:?}: destination already exists",
-            file_name, new_file_name
+            "failed to rename \"{}\" to \"{}\": destination already exists",
+            old_path.display(),
+            new_path.display()
         );
         return;
     }
 
     if dry_run {
-        info!("{:?} => {:?} (dry run)", file_name, new_file_name);
-        return;
-    }
-
-    if let Err(e) = rename(entry.path(), &new_path) {
-        error!(
-            "failed to rename {:?} to {:?}: {e}",
-            file_name, new_file_name
+        info!(
+            "\"{}\" => \"{}\" (dry run)",
+            old_path.display(),
+            new_path.display()
         );
         return;
     }
-    info!("{:?} => {:?}", file_name, new_file_name);
+
+    if let Err(e) = rename(&old_path, &new_path) {
+        error!(
+            "failed to rename \"{}\" to \"{}\": {e}",
+            old_path.display(),
+            new_path.display()
+        );
+        return;
+    }
+    info!("\"{}\" => \"{}\"", old_path.display(), new_path.display());
 }
 
 fn watch(screenshot_dir: &Path, dry_run: bool) -> anyhow::Result<()> {
@@ -173,7 +184,7 @@ fn watch(screenshot_dir: &Path, dry_run: bool) -> anyhow::Result<()> {
         .watch(screenshot_dir, RecursiveMode::NonRecursive)
         .context("failed to watch screenshot directory")?;
 
-    info!("watching {:?} for changes...", screenshot_dir);
+    info!("watching \"{}\" for changes...", screenshot_dir.display());
 
     for result in rx {
         match result {
