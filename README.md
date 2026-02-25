@@ -29,12 +29,12 @@ windows-screenshot-renamer.exe
 
 ### Options
 
-| Flag                       | Description                                           | Default                                                                    |
-| -------------------------- | ----------------------------------------------------- | -------------------------------------------------------------------------- |
-| `--screenshots-dir <PATH>` | Screenshots directory                                 | `%USERPROFILE%\Pictures\Screenshots`                                       |
-| `--log-file <PATH>`        | Log file path                                         | `%LOCALAPPDATA%\windows-screenshot-renamer\windows-screenshot-renamer.log` |
-| `--watch`                  | Watch for changes and automatically rename            |                                                                            |
-| `--dry-run`                | Print what would be renamed without actually renaming |                                                                            |
+| Flag                                  | Description                                           | Default                                                                    |
+| ------------------------------------- | ----------------------------------------------------- | -------------------------------------------------------------------------- |
+| `--screenshots-dir <SCREENSHOTS_DIR>` | Screenshots directory                                 | `%USERPROFILE%\Pictures\Screenshots`                                       |
+| `--log-file <LOG_FILE>`               | Log file path                                         | `%LOCALAPPDATA%\windows-screenshot-renamer\windows-screenshot-renamer.log` |
+| `--watch`                             | Watch for changes and automatically rename            |                                                                            |
+| `--dry-run`                           | Print what would be renamed without actually renaming |                                                                            |
 
 ### Examples
 
