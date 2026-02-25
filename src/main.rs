@@ -1,7 +1,7 @@
 #[cfg(not(windows))]
 compile_error!("this program only supports Windows");
 
-use std::fs::{DirEntry, read_dir, rename};
+use std::fs::{DirEntry, File, read_dir, rename};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::sync::mpsc;
@@ -10,7 +10,7 @@ use std::time::Duration;
 use anyhow::Context as _;
 use chrono::{DateTime, Local};
 use clap::Parser;
-use dirs_next::picture_dir;
+use dirs_next::{data_local_dir, picture_dir};
 use lazy_regex::{Lazy, Regex, lazy_regex};
 use log::{debug, error, info};
 use notify::{RecursiveMode, Watcher};
@@ -21,6 +21,10 @@ struct Args {
     /// Screenshots directory
     #[arg(long, default_value_os_t = default_screenshots_dir())]
     screenshots_dir: PathBuf,
+
+    /// Log file path
+    #[arg(long, default_value_os_t = default_log_file())]
+    log_file: PathBuf,
 
     /// Watch for changes and automatically rename
     #[arg(long)]
@@ -37,6 +41,14 @@ fn default_screenshots_dir() -> PathBuf {
         .unwrap_or_else(|| PathBuf::from("Screenshots"))
 }
 
+fn default_log_file() -> PathBuf {
+    let name = env!("CARGO_PKG_NAME");
+    let file_name = format!("{name}.log");
+    data_local_dir()
+        .map(|p| p.join(name).join(&file_name))
+        .unwrap_or_else(|| PathBuf::from(file_name))
+}
+
 static RE_SNIPPING_TOOL_JA: Lazy<Regex> =
     lazy_regex!(r"^スクリーンショット (\d{4}-\d{2}-\d{2} \d{6})\.png$");
 static RE_OLD_SNIPPING_TOOL_JA: Lazy<Regex> =
@@ -44,9 +56,27 @@ static RE_OLD_SNIPPING_TOOL_JA: Lazy<Regex> =
 static RE_SCREENSHOT_JA: Lazy<Regex> = lazy_regex!(r"^スクリーンショット(?: \(\d+\))?\.png$");
 
 fn main() -> ExitCode {
-    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
+    let args = Args::parse();
 
-    if let Err(e) = run() {
+    let log_file = &args.log_file;
+    if let Some(parent) = log_file.parent()
+        && let Err(e) = std::fs::create_dir_all(parent)
+    {
+        eprintln!("failed to create log directory {:?}: {e}", parent);
+        return ExitCode::FAILURE;
+    }
+    let file = match File::create(log_file) {
+        Ok(file) => file,
+        Err(e) => {
+            eprintln!("failed to create log file {:?}: {e}", log_file);
+            return ExitCode::FAILURE;
+        }
+    };
+    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info"))
+        .target(env_logger::Target::Pipe(Box::new(file)))
+        .init();
+
+    if let Err(e) = run(&args) {
         error!("{e}");
         return ExitCode::FAILURE;
     }
@@ -54,9 +84,7 @@ fn main() -> ExitCode {
     ExitCode::SUCCESS
 }
 
-fn run() -> anyhow::Result<()> {
-    let args = Args::parse();
-
+fn run(args: &Args) -> anyhow::Result<()> {
     scan_and_rename(&args.screenshots_dir, args.dry_run)?;
 
     if args.watch {
