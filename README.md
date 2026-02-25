@@ -27,6 +27,29 @@ cargo install --git https://github.com/koyashiro/windows-screenshot-renamer
 windows-screenshot-renamer.exe
 ```
 
+### Options
+
+| Flag                       | Description                                           | Default                                                                    |
+| -------------------------- | ----------------------------------------------------- | -------------------------------------------------------------------------- |
+| `--screenshots-dir <PATH>` | Screenshots directory                                 | `%USERPROFILE%\Pictures\Screenshots`                                       |
+| `--log-file <PATH>`        | Log file path                                         | `%LOCALAPPDATA%\windows-screenshot-renamer\windows-screenshot-renamer.log` |
+| `--watch`                  | Watch for changes and automatically rename            |                                                                            |
+| `--dry-run`                | Print what would be renamed without actually renaming |                                                                            |
+
+### Examples
+
+Watch mode:
+
+```powershell
+windows-screenshot-renamer.exe --watch
+```
+
+Dry run:
+
+```powershell
+windows-screenshot-renamer.exe --dry-run
+```
+
 The log level can be changed via the `RUST_LOG` environment variable.
 
 ```powershell
