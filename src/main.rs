@@ -2,8 +2,10 @@
 compile_error!("this program only supports Windows");
 
 use std::fs::{DirEntry, read_dir, rename};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::ExitCode;
+use std::sync::mpsc;
+use std::time::Duration;
 
 use anyhow::Context as _;
 use chrono::{DateTime, Local};
@@ -11,6 +13,7 @@ use clap::Parser;
 use dirs_next::picture_dir;
 use lazy_regex::{Lazy, Regex, lazy_regex};
 use log::{debug, error, info};
+use notify::{RecursiveMode, Watcher};
 
 #[derive(Parser)]
 #[command(version, about)]
@@ -18,6 +21,10 @@ struct Args {
     /// Screenshots directory
     #[arg(long, default_value_os_t = default_screenshots_dir())]
     screenshots_dir: PathBuf,
+
+    /// Watch for changes and automatically rename
+    #[arg(long)]
+    watch: bool,
 
     /// Dry run (print what would be renamed without actually renaming)
     #[arg(long)]
@@ -49,10 +56,19 @@ fn main() -> ExitCode {
 
 fn run() -> anyhow::Result<()> {
     let args = Args::parse();
-    let screenshot_dir = args.screenshots_dir;
-    let dry_run = args.dry_run;
+
+    scan_and_rename(&args.screenshots_dir, args.dry_run)?;
+
+    if args.watch {
+        watch(&args.screenshots_dir, args.dry_run)?;
+    }
+
+    Ok(())
+}
+
+fn scan_and_rename(screenshot_dir: &Path, dry_run: bool) -> anyhow::Result<()> {
     let screenshot_files =
-        read_dir(&screenshot_dir).context("failed to read screenshot directory")?;
+        read_dir(screenshot_dir).context("failed to read screenshot directory")?;
 
     for entry in screenshot_files {
         let Ok(entry) = entry else {
@@ -60,45 +76,77 @@ fn run() -> anyhow::Result<()> {
             continue;
         };
 
-        let Ok(file_name) = entry.file_name().into_string() else {
-            error!(
-                "failed to convert file name to string: {:?}",
-                entry.file_name()
-            );
-            continue;
-        };
+        process_entry(screenshot_dir, &entry, dry_run);
+    }
 
-        let Ok(new_file_name) = new_file_name(&entry, &file_name) else {
-            error!("failed to determine new file name for {:?}", file_name);
-            continue;
-        };
-        let Some(new_file_name) = new_file_name else {
-            debug!("skipping {:?}", file_name);
-            continue;
-        };
-        let new_path = screenshot_dir.join(&new_file_name);
+    Ok(())
+}
 
-        if new_path.exists() {
-            error!(
-                "failed to rename {:?} to {:?}: destination already exists",
-                file_name, new_file_name
-            );
-            continue;
+fn process_entry(screenshot_dir: &Path, entry: &DirEntry, dry_run: bool) {
+    let Ok(file_name) = entry.file_name().into_string() else {
+        error!(
+            "failed to convert file name to string: {:?}",
+            entry.file_name()
+        );
+        return;
+    };
+
+    let Ok(new_file_name) = new_file_name(entry, &file_name) else {
+        error!("failed to determine new file name for {:?}", file_name);
+        return;
+    };
+    let Some(new_file_name) = new_file_name else {
+        debug!("skipping {:?}", file_name);
+        return;
+    };
+    let new_path = screenshot_dir.join(&new_file_name);
+
+    if new_path.exists() {
+        error!(
+            "failed to rename {:?} to {:?}: destination already exists",
+            file_name, new_file_name
+        );
+        return;
+    }
+
+    if dry_run {
+        info!("{:?} => {:?} (dry run)", file_name, new_file_name);
+        return;
+    }
+
+    if let Err(e) = rename(entry.path(), &new_path) {
+        error!(
+            "failed to rename {:?} to {:?}: {e}",
+            file_name, new_file_name
+        );
+        return;
+    }
+    info!("{:?} => {:?}", file_name, new_file_name);
+}
+
+fn watch(screenshot_dir: &Path, dry_run: bool) -> anyhow::Result<()> {
+    let (tx, rx) = mpsc::channel();
+
+    let mut watcher =
+        notify::recommended_watcher(tx).context("failed to create filesystem watcher")?;
+    watcher
+        .watch(screenshot_dir, RecursiveMode::NonRecursive)
+        .context("failed to watch screenshot directory")?;
+
+    info!("watching {:?} for changes...", screenshot_dir);
+
+    for result in rx {
+        match result {
+            Ok(_) => {
+                std::thread::sleep(Duration::from_millis(200));
+                if let Err(e) = scan_and_rename(screenshot_dir, dry_run) {
+                    error!("failed to scan and rename: {e}");
+                }
+            }
+            Err(e) => {
+                error!("watch error: {e}");
+            }
         }
-
-        if dry_run {
-            info!("{:?} => {:?} (dry run)", file_name, new_file_name);
-            continue;
-        }
-
-        if let Err(e) = rename(entry.path(), &new_path) {
-            error!(
-                "failed to rename {:?} to {:?}: {e}",
-                file_name, new_file_name
-            );
-            continue;
-        }
-        info!("{:?} => {:?}", file_name, new_file_name);
     }
 
     Ok(())
