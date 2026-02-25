@@ -2,13 +2,29 @@
 compile_error!("this program only supports Windows");
 
 use std::fs::{DirEntry, read_dir, rename};
+use std::path::PathBuf;
 use std::process::ExitCode;
 
-use anyhow::{Context as _, anyhow};
+use anyhow::Context as _;
 use chrono::{DateTime, Local};
+use clap::Parser;
 use dirs_next::picture_dir;
 use lazy_regex::{Lazy, Regex, lazy_regex};
 use log::{debug, error, info};
+
+#[derive(Parser)]
+#[command(version, about)]
+struct Args {
+    /// Screenshots directory
+    #[arg(long, default_value_os_t = default_screenshots_dir())]
+    screenshots_dir: PathBuf,
+}
+
+fn default_screenshots_dir() -> PathBuf {
+    picture_dir()
+        .map(|p| p.join("Screenshots"))
+        .unwrap_or_else(|| PathBuf::from("Screenshots"))
+}
 
 static RE_SNIPPING_TOOL_JA: Lazy<Regex> =
     lazy_regex!(r"^スクリーンショット (\d{4}-\d{2}-\d{2} \d{6})\.png$");
@@ -28,7 +44,8 @@ fn main() -> ExitCode {
 }
 
 fn run() -> anyhow::Result<()> {
-    let screenshot_dir = screenshot_dir().context("failed to determine screenshot directory")?;
+    let args = Args::parse();
+    let screenshot_dir = args.screenshots_dir;
     let screenshot_files =
         read_dir(&screenshot_dir).context("failed to read screenshot directory")?;
 
@@ -75,13 +92,6 @@ fn run() -> anyhow::Result<()> {
     }
 
     Ok(())
-}
-
-fn screenshot_dir() -> anyhow::Result<std::path::PathBuf> {
-    let picture_dir =
-        picture_dir().ok_or_else(|| anyhow!("failed to determine picture directory"))?;
-
-    Ok(picture_dir.join("Screenshots"))
 }
 
 fn new_file_name(entry: &DirEntry, file_name: &str) -> anyhow::Result<Option<String>> {
