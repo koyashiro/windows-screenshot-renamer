@@ -1,14 +1,14 @@
 #[cfg(not(windows))]
 compile_error!("this program only supports Windows");
 
-use std::fs::{DirEntry, File, read_dir, rename};
+use std::fs::{DirEntry, OpenOptions, read_dir, rename};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::sync::mpsc;
 use std::time::Duration;
 
 use anyhow::Context as _;
-use chrono::{DateTime, Local};
+use chrono::{DateTime, Local, SecondsFormat};
 use clap::Parser;
 use dirs_next::{data_local_dir, picture_dir};
 use lazy_regex::{Lazy, Regex, lazy_regex};
@@ -65,14 +65,26 @@ fn main() -> ExitCode {
         eprintln!("failed to create log directory {:?}: {e}", parent);
         return ExitCode::FAILURE;
     }
-    let file = match File::create(log_file) {
+    let file = match OpenOptions::new().create(true).append(true).open(log_file) {
         Ok(file) => file,
         Err(e) => {
-            eprintln!("failed to create log file {:?}: {e}", log_file);
+            eprintln!("failed to open log file {:?}: {e}", log_file);
             return ExitCode::FAILURE;
         }
     };
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info"))
+        .format(|buf, record| {
+            use std::io::Write;
+            let now = Local::now();
+            writeln!(
+                buf,
+                "[{} {:5} {}] {}",
+                now.to_rfc3339_opts(SecondsFormat::Millis, false),
+                record.level(),
+                record.target(),
+                record.args()
+            )
+        })
         .target(env_logger::Target::Pipe(Box::new(file)))
         .init();
 
