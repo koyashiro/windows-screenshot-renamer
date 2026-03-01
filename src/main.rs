@@ -3,8 +3,9 @@ compile_error!("this program only supports Windows");
 
 use std::fs::{DirEntry, OpenOptions, read_dir, rename};
 use std::path::{Path, PathBuf};
-use std::process::ExitCode;
-use std::sync::mpsc;
+use std::process::{Command, ExitCode};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, mpsc};
 use std::time::Duration;
 
 use anyhow::Context as _;
@@ -14,6 +15,8 @@ use dirs_next::{data_local_dir, picture_dir};
 use lazy_regex::{Lazy, Regex, lazy_regex};
 use log::{debug, error, info};
 use notify::{RecursiveMode, Watcher};
+use tray_icon::menu::{Menu, MenuEvent, MenuItem};
+use tray_icon::{Icon, TrayIconBuilder};
 
 #[derive(Parser)]
 #[command(version, about)]
@@ -103,7 +106,7 @@ fn run(args: &Args) -> anyhow::Result<()> {
     scan_and_rename(&args.screenshots_dir, args.dry_run)?;
 
     if args.watch {
-        watch(&args.screenshots_dir, args.dry_run)?;
+        watch(&args.screenshots_dir, args.dry_run, &args.log_file)?;
     }
 
     Ok(())
@@ -175,7 +178,120 @@ fn process_entry(screenshot_dir: &Path, entry: &DirEntry, dry_run: bool) {
     info!("\"{}\" => \"{}\"", old_path.display(), new_path.display());
 }
 
-fn watch(screenshot_dir: &Path, dry_run: bool) -> anyhow::Result<()> {
+fn watch(screenshot_dir: &Path, dry_run: bool, log_file: &Path) -> anyhow::Result<()> {
+    hide_console_window();
+
+    let paused = Arc::new(AtomicBool::new(false));
+
+    let dir = screenshot_dir.to_path_buf();
+    let paused_clone = Arc::clone(&paused);
+    std::thread::spawn(move || {
+        if let Err(e) = watch_and_rename(&dir, dry_run, &paused_clone) {
+            error!("filesystem watcher error: {e}");
+        }
+    });
+
+    let open_log_item = MenuItem::new("Open Log", true, None);
+    let pause_item = MenuItem::new("Pause", true, None);
+    let quit_item = MenuItem::new("Exit", true, None);
+    let menu = Menu::new();
+    menu.append(&pause_item)
+        .context("failed to add menu item")?;
+    menu.append(&open_log_item)
+        .context("failed to add menu item")?;
+    menu.append(&quit_item).context("failed to add menu item")?;
+
+    let icon = create_tray_icon_image();
+    let _tray_icon = TrayIconBuilder::new()
+        .with_menu(Box::new(menu))
+        .with_menu_on_left_click(false)
+        .with_tooltip(env!("CARGO_PKG_NAME"))
+        .with_icon(icon)
+        .build()
+        .context("failed to create tray icon")?;
+
+    debug!("tray icon created");
+
+    info!("watching \"{}\" for changes...", screenshot_dir.display());
+
+    run_message_loop(&open_log_item, &pause_item, &quit_item, &paused, log_file);
+
+    info!("exiting...");
+    Ok(())
+}
+
+fn hide_console_window() {
+    use windows::Win32::System::Console::GetConsoleWindow;
+    use windows::Win32::UI::WindowsAndMessaging::{SW_HIDE, ShowWindow};
+
+    unsafe {
+        let hwnd = GetConsoleWindow();
+        if !hwnd.0.is_null() {
+            let _ = ShowWindow(hwnd, SW_HIDE);
+        }
+    }
+}
+
+fn create_tray_icon_image() -> Icon {
+    let size = 32u32;
+    let mut rgba = vec![0u8; (size * size * 4) as usize];
+    for pixel in rgba.chunks_exact_mut(4) {
+        pixel[0] = 0x33; // R
+        pixel[1] = 0x99; // G
+        pixel[2] = 0xFF; // B
+        pixel[3] = 0xFF; // A
+    }
+    Icon::from_rgba(rgba, size, size).expect("failed to create tray icon")
+}
+
+fn run_message_loop(
+    open_log_item: &MenuItem,
+    pause_item: &MenuItem,
+    quit_item: &MenuItem,
+    paused: &AtomicBool,
+    log_file: &Path,
+) {
+    use windows::Win32::UI::WindowsAndMessaging::{
+        DispatchMessageW, GetMessageW, MSG, PostQuitMessage, TranslateMessage,
+    };
+
+    let open_log_id = open_log_item.id().clone();
+    let pause_id = pause_item.id().clone();
+    let quit_id = quit_item.id().clone();
+    unsafe {
+        let mut msg = MSG::default();
+        while GetMessageW(&mut msg, None, 0, 0).as_bool() {
+            let _ = TranslateMessage(&msg);
+            DispatchMessageW(&msg);
+
+            if let Ok(event) = MenuEvent::receiver().try_recv() {
+                if event.id == open_log_id {
+                    if let Err(e) = Command::new("notepad").arg(log_file).spawn() {
+                        error!("failed to open log file: {e}");
+                    }
+                } else if event.id == pause_id {
+                    let was_paused = paused.fetch_xor(true, Ordering::Relaxed);
+                    if was_paused {
+                        pause_item.set_text("Pause");
+                        info!("watching resumed");
+                    } else {
+                        pause_item.set_text("Resume");
+                        info!("watching paused");
+                    }
+                } else if event.id == quit_id {
+                    info!("exit requested from tray menu");
+                    PostQuitMessage(0);
+                }
+            }
+        }
+    }
+}
+
+fn watch_and_rename(
+    screenshot_dir: &Path,
+    dry_run: bool,
+    paused: &AtomicBool,
+) -> anyhow::Result<()> {
     let (tx, rx) = mpsc::channel();
 
     let mut watcher =
@@ -184,12 +300,13 @@ fn watch(screenshot_dir: &Path, dry_run: bool) -> anyhow::Result<()> {
         .watch(screenshot_dir, RecursiveMode::NonRecursive)
         .context("failed to watch screenshot directory")?;
 
-    info!("watching \"{}\" for changes...", screenshot_dir.display());
-
     for result in rx {
         match result {
             Ok(_) => {
                 std::thread::sleep(Duration::from_millis(200));
+                if paused.load(Ordering::Relaxed) {
+                    continue;
+                }
                 if let Err(e) = scan_and_rename(screenshot_dir, dry_run) {
                     error!("failed to scan and rename: {e}");
                 }
